@@ -1,6 +1,5 @@
 import { IGeneratedPaper } from '@/models/GeneratedPaper';
 import { IAssignment } from '@/models/Assignment';
-import puppeteer from 'puppeteer';
 
 const DIFFICULTY_LABEL: Record<string, { label: string; color: string }> = {
   easy: { label: 'Easy', color: '#15803d' },
@@ -254,10 +253,32 @@ export const generateQuestionPaperPdf = async (assignment: IAssignment, paper: I
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    });
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+    if (isProduction) {
+      // Dynamic imports to prevent issues during local dev compilation/runtime on Windows
+      const puppeteerCore = await import('puppeteer-core');
+      const chromium = await import('@sparticuz/chromium');
+      
+      const chromiumModule = (chromium as any).default || chromium;
+      const puppeteerCoreModule = (puppeteerCore as any).default || puppeteerCore;
+      const launchFn = puppeteerCoreModule.launch || puppeteerCoreModule.default?.launch || puppeteerCoreModule;
+
+      browser = await launchFn({
+        args: [...chromiumModule.args, '--no-sandbox', '--disable-setuid-sandbox'],
+        defaultViewport: chromiumModule.defaultViewport,
+        executablePath: await chromiumModule.executablePath(),
+        headless: chromiumModule.headless,
+      });
+    } else {
+      const puppeteer = await import('puppeteer');
+      const puppeteerModule = (puppeteer as any).default || puppeteer;
+      const launchFn = puppeteerModule.launch || puppeteerModule.default?.launch || puppeteerModule;
+
+      browser = await launchFn({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+    }
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'domcontentloaded' });
     const pdfBuffer = await page.pdf({
