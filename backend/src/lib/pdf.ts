@@ -251,34 +251,36 @@ function getSectionLabel(sectionTitle: string): string {
 export const generateQuestionPaperPdf = async (assignment: IAssignment, paper: IGeneratedPaper): Promise<Buffer> => {
   const html = buildHtml(assignment, paper);
 
-  let browser;
-  try {
-    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
-    if (isProduction) {
-      // Dynamic imports to prevent issues during local dev compilation/runtime on Windows
-      const puppeteerCore = await import('puppeteer-core');
-      const chromium = await import('@sparticuz/chromium');
-      
-      const chromiumModule = (chromium as any).default || chromium;
-      const puppeteerCoreModule = (puppeteerCore as any).default || puppeteerCore;
-      const launchFn = puppeteerCoreModule.launch || puppeteerCoreModule.default?.launch || puppeteerCoreModule;
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
 
-      browser = await launchFn({
-        args: [...chromiumModule.args, '--no-sandbox', '--disable-setuid-sandbox'],
-        defaultViewport: chromiumModule.defaultViewport,
-        executablePath: await chromiumModule.executablePath(),
-        headless: chromiumModule.headless,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let browser: any;
+  try {
+    if (isProduction) {
+      // On Render: use statically-linked @sparticuz/chromium (v148 matches puppeteer-core@25 / Chrome 148)
+      // These are dynamic imports so Windows local dev is never broken by the Linux-only binary
+      const chromiumImport = await import('@sparticuz/chromium');
+      const puppeteerCoreImport = await import('puppeteer-core');
+      // Both packages use CommonJS + ESM interop — unwrap .default when present
+      const chromium = (chromiumImport as any).default ?? chromiumImport;
+      const puppeteerCore = (puppeteerCoreImport as any).default ?? puppeteerCoreImport;
+
+      browser = await puppeteerCore.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
       });
     } else {
-      const puppeteer = await import('puppeteer');
-      const puppeteerModule = (puppeteer as any).default || puppeteer;
-      const launchFn = puppeteerModule.launch || puppeteerModule.default?.launch || puppeteerModule;
-
-      browser = await launchFn({
+      // Local dev (Windows/Mac): standard puppeteer with its own bundled Chromium
+      const puppeteerImport = await import('puppeteer');
+      const puppeteer = (puppeteerImport as any).default ?? puppeteerImport;
+      browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
       });
     }
+
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'domcontentloaded' });
     const pdfBuffer = await page.pdf({
